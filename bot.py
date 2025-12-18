@@ -1,0 +1,811 @@
+import os
+import logging
+from datetime import datetime
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters, ConversationHandler
+from telegram.constants import ParseMode
+import asyncio
+import json
+import uuid
+
+# Enable logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Bot Configuration - Use Render environment variable
+BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+
+# External links
+COMMUNITY_GROUP_LINK = "https://t.me/YourCommunityGroup"
+NFT_MINTING_GROUP_LINK = "https://t.me/YourNFTGroup"
+PROMOTION_GROUP_LINK = "https://t.me/YourPromotionGroup"
+VERIFY_TREND_LINK = "https://t.me/skeletontrend"
+LOUNGE_GROUP_LINK = "https://t.me/skeletonlounge"
+SUPPORT_CONTACT = "@skeletondev"
+
+# Conversation states
+MAIN_MENU, SELECT_CHAIN, SELECT_DURATION, TOKEN_ADDRESS, TELEGRAM_LINK, TWITTER_LINK = range(6)
+
+class SkeletonTrendingBot:
+    def __init__(self):
+        self.orders = {}
+        self.user_data = {}
+        
+        # Chain configurations with correct currency pairs
+        self.chains = {
+            'bsc': {
+                'name': 'Binance Smart Chain',
+                'currency': 'BNB',
+                'symbol': '🔗',
+                'network': 'BEP20',
+                'conversion_rate': 0.45  # SOL to BNB conversion
+            },
+            'eth': {
+                'name': 'Ethereum',
+                'currency': 'ETH',
+                'symbol': '🟦',
+                'network': 'ERC20',
+                'conversion_rate': 0.05  # SOL to ETH conversion
+            },
+            'sol': {
+                'name': 'Solana',
+                'currency': 'SOL',
+                'symbol': '🟪',
+                'network': 'Solana',
+                'conversion_rate': 1.0
+            },
+            'base': {
+                'name': 'Base',
+                'currency': 'ETH',
+                'symbol': '⚪',
+                'network': 'Base',
+                'conversion_rate': 0.05
+            },
+            'pumpfun': {
+                'name': 'PumpFun Trending',
+                'currency': 'SOL',
+                'symbol': '🔥',
+                'network': 'Solana',
+                'conversion_rate': 1.0
+            },
+            'possum': {
+                'name': 'Possumlabs Trending',
+                'currency': 'SOL',
+                'symbol': '🦝',
+                'network': 'Solana',
+                'conversion_rate': 1.0
+            },
+            'fourmeme': {
+                'name': 'FourMeme Trending',
+                'currency': 'BNB',
+                'symbol': '🎭',
+                'network': 'BEP20',
+                'conversion_rate': 0.45
+            }
+        }
+        
+        # Base prices in SOL
+        self.base_prices = {
+            '4_hours': 1.8,
+            '8_hours': 2.7,
+            '12_hours': 3.75,
+            '24_hours': 5.25
+        }
+        
+        # Calculate all prices
+        self.prices = self.calculate_prices()
+    
+    def calculate_prices(self):
+        """Calculate prices for all chains"""
+        prices = {}
+        for duration, sol_price in self.base_prices.items():
+            prices[duration] = {}
+            for chain_id, chain_info in self.chains.items():
+                price = sol_price * chain_info['conversion_rate']
+                prices[duration][chain_id] = round(price, 3)
+        return prices
+    
+    def initialize_user(self, user_id: int):
+        """Initialize user data"""
+        if user_id not in self.orders:
+            self.orders[user_id] = {
+                'chain': None,
+                'duration': None,
+                'token_address': None,
+                'telegram_link': None,
+                'twitter_link': None,
+                'order_date': None,
+                'status': 'pending',
+                'order_id': None
+            }
+        
+        if user_id not in self.user_data:
+            self.user_data[user_id] = {
+                'username': '',
+                'orders': 0,
+                'total_spent': 0,
+                'join_date': datetime.now().isoformat()
+            }
+    
+    def create_welcome_message(self) -> str:
+        """Create welcome message"""
+        current_date = datetime.now().strftime("%B %d")
+        current_time = datetime.now().strftime("%H:%M")
+        
+        return f"""
+<b># Skeleton Trending Boost Bot</b>
+
+@SkeletonTrendingBot  
+Always verify on {VERIFY_TREND_LINK} and in {LOUNGE_GROUP_LINK}  
+
+<code>────────────────────</code>
+
+<b>{current_date}</b>
+
+/start  {current_time} ✅
+
+<code>────────────────────</code>
+
+<b>WELCOME TO</b>
+<b>FASTTRACK TRENDING BOOST</b>
+<b>SERVICE</b>
+
+<b>BOOST YOUR TOKEN ON TRENDING IN SECONDS</b>
+
+Welcome to Skeleton Fasttrack Trending listing service!
+This Agent helps you to list your token on {VERIFY_TREND_LINK} fast and secure.
+
+<b>FREE MASS DM promotion</b> sending to 112k users + 1 SolidSkull NFT free for 24Hours trending orders!
+To avail contact {SUPPORT_CONTACT}
+
+<i>Let's start and Choose an Option:</i>
+"""
+    
+    def create_main_menu(self) -> InlineKeyboardMarkup:
+        """Create main menu"""
+        keyboard = [
+            [InlineKeyboardButton("🚀 Main Trending Boost", callback_data="main_boost")],
+            [InlineKeyboardButton("👥 Community Trending", callback_data="community_boost")],
+            [InlineKeyboardButton("📊 Check All Promotion Options", callback_data="all_promotions")],
+            [InlineKeyboardButton("💀 Mint SolidSkull NFT", callback_data="mint_nft")]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+    
+    def create_chain_selection(self) -> tuple:
+        """Create chain selection menu"""
+        text = f"""
+<b># Skeleton Trending Boost Bot</b>
+
+@SkeletonTrendingBot  
+Always verify on {VERIFY_TREND_LINK} and in {LOUNGE_GROUP_LINK}  
+
+<code>────────────────────</code>
+
+<b>{datetime.now().strftime("%B %d")}</b>
+
+/start  {datetime.now().strftime("%H:%M")} ▼
+
+<code>────────────────────</code>
+
+@SkeletonTrendingBot  
+Select the chain your token is on: {datetime.now().strftime("%H:%M")}
+
+<b>Each chain uses its native currency:</b>
+• BSC → BNB
+• Ethereum → ETH
+• Solana → SOL
+• Base → ETH
+• PumpFun → SOL
+• Possumlabs → SOL
+• FourMeme → BNB
+"""
+        
+        keyboard = [
+            [InlineKeyboardButton(f"{self.chains['bsc']['symbol']} BSC (BNB)", callback_data="chain_bsc")],
+            [InlineKeyboardButton(f"{self.chains['eth']['symbol']} Ethereum (ETH)", callback_data="chain_eth")],
+            [InlineKeyboardButton(f"{self.chains['sol']['symbol']} Solana (SOL)", callback_data="chain_sol")],
+            [InlineKeyboardButton(f"{self.chains['base']['symbol']} Base (ETH)", callback_data="chain_base")],
+            [InlineKeyboardButton(f"{self.chains['pumpfun']['symbol']} PumpFun (SOL)", callback_data="chain_pumpfun")],
+            [InlineKeyboardButton(f"{self.chains['possum']['symbol']} Possumlabs (SOL)", callback_data="chain_possum")],
+            [InlineKeyboardButton(f"{self.chains['fourmeme']['symbol']} FourMeme (BNB)", callback_data="chain_fourmeme")],
+            [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")]
+        ]
+        
+        return text, InlineKeyboardMarkup(keyboard)
+    
+    def create_community_selection(self) -> tuple:
+        """Create community trending selection (Solana only)"""
+        text = f"""
+<b>👥 COMMUNITY TRENDING</b>
+
+<code>────────────────────</code>
+
+<i>Community Trending only supports Solana tokens</i>
+
+<b>Pricing (in SOL):</b>
+• 4 Hours: {self.base_prices['4_hours']} SOL
+• 8 Hours: {self.base_prices['8_hours']} SOL
+• 12 Hours: {self.base_prices['12_hours']} SOL
+• 24 Hours: {self.base_prices['24_hours']} SOL
+
+<code>────────────────────</code>
+
+<b>Community benefits:</b>
+• Promotion in community groups
+• Lower pricing than main trending
+• Still includes free NFT
+
+<i>Proceed with Solana?</i>
+"""
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Yes, Proceed with SOL", callback_data="chain_sol_community")],
+            [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")]
+        ]
+        
+        return text, InlineKeyboardMarkup(keyboard)
+    
+    def create_duration_selection(self, chain_id: str) -> tuple:
+        """Create duration selection with chain-specific prices"""
+        chain_info = self.chains.get(chain_id, self.chains['sol'])
+        
+        text = f"""
+<b># TRENDING BOOST SERVICE</b>
+
+<code>────────────────────</code>
+
+<b>Chain:</b> {chain_info['name']}
+<b>Currency:</b> {chain_info['currency']}
+<b>Network:</b> {chain_info['network']}
+
+<code>────────────────────</code>
+
+<b>Free Mass DM promotion</b> sending to 112k users + 1 SolidSkull NFT free for 24Hours trending orders!
+To avail contact {SUPPORT_CONTACT}
+
+<b>Select duration:</b>
+"""
+        
+        keyboard = []
+        for duration_key, duration_name in [('4_hours', '4 Hours'), ('8_hours', '8 Hours'), 
+                                           ('12_hours', '12 Hours'), ('24_hours', '24 Hours')]:
+            price = self.prices[duration_key][chain_id]
+            currency = chain_info['currency']
+            
+            # Format price
+            if currency in ['ETH', 'BNB']:
+                price_str = f"{price:.3f}"
+            else:
+                price_str = f"{price:.2f}"
+            
+            if duration_key == '24_hours':
+                button_text = f"⏱️ {duration_name} - {price_str} {currency} [+Mass Dm & NFT]"
+            else:
+                button_text = f"⏱️ {duration_name} - {price_str} {currency} [+ Free NFT]"
+            
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"duration_{duration_key}")])
+        
+        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_to_chains")])
+        
+        return text, InlineKeyboardMarkup(keyboard)
+    
+    def create_order_summary(self, user_id: int) -> tuple:
+        """Create order summary"""
+        user_data = self.orders[user_id]
+        chain_info = self.chains.get(user_data['chain'], self.chains['sol'])
+        duration = user_data['duration'].replace('_', ' ')
+        price = self.prices[user_data['duration']][user_data['chain']]
+        
+        # Generate order ID
+        order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
+        user_data['order_id'] = order_id
+        
+        # Format price
+        if chain_info['currency'] in ['ETH', 'BNB']:
+            price_str = f"{price:.3f}"
+        else:
+            price_str = f"{price:.2f}"
+        
+        # Get wallet based on chain
+        wallet_info = self.get_wallet_info(user_data['chain'])
+        
+        text = f"""
+<b>✅ ORDER SUMMARY</b>
+
+<code>────────────────────</code>
+
+<b>📋 Order Details:</b>
+• Order ID: <code>{order_id}</code>
+• Chain: {chain_info['name']}
+• Duration: {duration}
+• Currency: {chain_info['currency']}
+• Amount: {price_str} {chain_info['currency']}
+
+<b>📝 Token Info:</b>
+• Address: <code>{user_data['token_address'][:30]}...</code>
+• Telegram: {user_data['telegram_link']}
+• Twitter: {user_data['twitter_link'] or 'Not provided'}
+
+<code>────────────────────</code>
+
+<b>💰 Payment Information:</b>
+• Send: {price_str} {chain_info['currency']}
+• To: <code>{wallet_info['address']}</code>
+• Network: {wallet_info['network']}
+• Memo: <code>{order_id}</code>
+
+<code>────────────────────</code>
+
+<b>🎁 Free Bonus:</b>
+• SolidSkull NFT (all orders)
+• Mass DM to 112k users (24h orders)
+
+<code>────────────────────</code>
+
+<b>📞 After Payment:</b>
+1. Send payment screenshot
+2. Contact: {SUPPORT_CONTACT}
+3. Include Order ID: <code>{order_id}</code>
+4. Go live within 15 minutes!
+
+<b>Support:</b> {SUPPORT_CONTACT}
+"""
+        
+        keyboard = [
+            [InlineKeyboardButton("💳 I've Sent Payment", callback_data="payment_sent")],
+            [InlineKeyboardButton("📞 Contact Support", url=f"https://t.me/{SUPPORT_CONTACT.replace('@', '')}")],
+            [InlineKeyboardButton("🔄 New Order", callback_data="new_order")]
+        ]
+        
+        return text, InlineKeyboardMarkup(keyboard)
+    
+    def get_wallet_info(self, chain_id: str) -> dict:
+        """Get wallet information for chain"""
+        wallets = {
+            'bsc': {
+                'address': '0xYourBNBWalletAddress',
+                'network': 'Binance Smart Chain (BEP20)'
+            },
+            'eth': {
+                'address': '0xYourETHWalletAddress',
+                'network': 'Ethereum (ERC20)'
+            },
+            'sol': {
+                'address': 'YourSolanaWalletAddress',
+                'network': 'Solana'
+            },
+            'base': {
+                'address': '0xYourBaseWalletAddress',
+                'network': 'Base Network'
+            },
+            'pumpfun': {
+                'address': 'YourSolanaWalletAddress',
+                'network': 'Solana'
+            },
+            'possum': {
+                'address': 'YourSolanaWalletAddress',
+                'network': 'Solana'
+            },
+            'fourmeme': {
+                'address': '0xYourBNBWalletAddress',
+                'network': 'Binance Smart Chain (BEP20)'
+            }
+        }
+        return wallets.get(chain_id, wallets['sol'])
+
+# Initialize bot
+bot = SkeletonTrendingBot()
+
+# ==================== COMMAND HANDLERS ====================
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /start command"""
+    user_id = update.effective_user.id
+    user = update.effective_user
+    
+    bot.initialize_user(user_id)
+    bot.user_data[user_id]['username'] = user.username or user.first_name
+    
+    welcome_text = bot.create_welcome_message()
+    
+    await update.message.reply_text(
+        welcome_text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=bot.create_main_menu()
+    )
+    
+    return MAIN_MENU
+
+async def handle_button_press(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle all button presses"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    bot.initialize_user(user_id)
+    
+    # ===== MAIN MENU ACTIONS =====
+    if query.data == "main_boost":
+        text, keyboard = bot.create_chain_selection()
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        return SELECT_CHAIN
+    
+    elif query.data == "community_boost":
+        text, keyboard = bot.create_community_selection()
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        return SELECT_CHAIN
+    
+    elif query.data == "all_promotions":
+        # Link to Telegram group
+        text = f"""
+<b>📊 ALL PROMOTION OPTIONS</b>
+
+<code>────────────────────</code>
+
+Join our official promotion group to see:
+• All trending services
+• Community promotions
+• NFT minting info
+• Special offers
+• Live updates
+
+<code>────────────────────</code>
+
+<b>Click below to join:</b>
+"""
+        await query.edit_message_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎯 Join Promotion Group", url=PROMOTION_GROUP_LINK)],
+                [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")]
+            ])
+        )
+    
+    elif query.data == "mint_nft":
+        # Link to NFT group
+        text = f"""
+<b>💀 MINT SOLIDSKULL NFT</b>
+
+<code>────────────────────</code>
+
+<b>SolidSkull NFT Benefits:</b>
+• Exclusive access to premium channels
+• Priority support
+• Voting rights in ecosystem
+• Royalty sharing (5%)
+• Free with all trending orders!
+
+<code>────────────────────</code>
+
+<b>To mint or learn more:</b>
+Join our NFT community group:
+"""
+        await query.edit_message_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💀 Join NFT Group", url=NFT_MINTING_GROUP_LINK)],
+                [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")]
+            ])
+        )
+    
+    # ===== CHAIN SELECTION =====
+    elif query.data.startswith("chain_"):
+        chain = query.data.replace("chain_", "")
+        if "_community" in chain:
+            chain = chain.replace("_community", "")
+            # Community trending specific logic if needed
+        
+        bot.orders[user_id]['chain'] = chain
+        
+        text, keyboard = bot.create_duration_selection(chain)
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        return SELECT_DURATION
+    
+    # ===== DURATION SELECTION =====
+    elif query.data.startswith("duration_"):
+        duration = query.data.replace("duration_", "")
+        bot.orders[user_id]['duration'] = duration
+        
+        # Ask for token address
+        chain_info = bot.chains.get(bot.orders[user_id]['chain'], bot.chains['sol'])
+        text = f"""
+<b># Skeleton Trending Boost Bot</b>
+
+<code>────────────────────</code>
+
+<b>Please send your token address:</b> {datetime.now().strftime("%H:%M")}
+
+<code>────────────────────</code>
+
+<b>Chain:</b> {chain_info['name']}
+<b>Duration:</b> {duration.replace('_', ' ')}
+<b>Payment:</b> {bot.prices[duration][bot.orders[user_id]['chain']]:.3f} {chain_info['currency']}
+
+<code>────────────────────</code>
+
+<i>Send your token contract address:</i>
+"""
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML)
+        return TOKEN_ADDRESS
+    
+    # ===== ORDER COMPLETION =====
+    elif query.data == "payment_sent":
+        order_id = bot.orders[user_id].get('order_id', 'N/A')
+        await query.answer(f"✅ Payment confirmed! Order ID: {order_id}\nContact {SUPPORT_CONTACT} with screenshot.", show_alert=True)
+        
+        # Send support contact info
+        text = f"""
+<b>📞 CONTACT SUPPORT</b>
+
+<code>────────────────────</code>
+
+<b>Order ID:</b> <code>{order_id}</code>
+<b>Contact:</b> {SUPPORT_CONTACT}
+
+<code>────────────────────</code>
+
+<i>Send payment screenshot and order ID to go live!</i>
+"""
+        await query.edit_message_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📱 Message Support", url=f"https://t.me/{SUPPORT_CONTACT.replace('@', '')}")],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]
+            ])
+        )
+    
+    # ===== NAVIGATION =====
+    elif query.data == "back_to_menu":
+        welcome_text = bot.create_welcome_message()
+        await query.edit_message_text(welcome_text, parse_mode=ParseMode.HTML, reply_markup=bot.create_main_menu())
+        return MAIN_MENU
+    
+    elif query.data == "back_to_chains":
+        text, keyboard = bot.create_chain_selection()
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        return SELECT_CHAIN
+    
+    elif query.data == "new_order":
+        # Reset user order
+        bot.orders[user_id] = {
+            'chain': None,
+            'duration': None,
+            'token_address': None,
+            'telegram_link': None,
+            'twitter_link': None,
+            'order_date': None,
+            'status': 'pending',
+            'order_id': None
+        }
+        
+        text, keyboard = bot.create_chain_selection()
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        return SELECT_CHAIN
+    
+    return MAIN_MENU
+
+async def handle_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle token address input"""
+    user_id = update.effective_user.id
+    token_address = update.message.text.strip()
+    
+    if len(token_address) < 10:
+        await update.message.reply_text("❌ Invalid token address. Please send a valid contract address:")
+        return TOKEN_ADDRESS
+    
+    bot.orders[user_id]['token_address'] = token_address
+    
+    # Ask for Telegram link
+    text = f"""
+<b># Skeleton Trending Boost Bot</b>
+
+<code>────────────────────</code>
+
+<b>Token address received ✅</b>
+<code>{token_address[:50]}...</code>
+
+<code>────────────────────</code>
+
+<b>Please send the Telegram link:</b> {datetime.now().strftime("%H:%M")}
+
+<i>Format: https://t.me/yourchannel</i>
+<i>Example: https://t.me/pandagenerate</i>
+"""
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+    return TELEGRAM_LINK
+
+async def handle_telegram_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle Telegram link input"""
+    user_id = update.effective_user.id
+    telegram_link = update.message.text.strip()
+    
+    if not (telegram_link.startswith('https://t.me/') or telegram_link.startswith('t.me/')):
+        await update.message.reply_text("❌ Invalid Telegram link. Must start with https://t.me/\nPlease send a valid link:")
+        return TELEGRAM_LINK
+    
+    bot.orders[user_id]['telegram_link'] = telegram_link
+    
+    # Ask for Twitter link (optional)
+    text = f"""
+<b># Skeleton Trending Boost Bot</b>
+
+<code>────────────────────</code>
+
+<b>Telegram link received ✅</b>
+{telegram_link}
+
+<code>────────────────────</code>
+
+<b>Add your token Twitter [X] Link (optional):</b> {datetime.now().strftime("%H:%M")}
+
+Tokens with X link get posted on Skeletonecosys X Trending!
+
+<i>Send X link or type "skip" to skip:</i>
+<i>Format: @username or full URL</i>
+"""
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+    return TWITTER_LINK
+
+async def handle_twitter_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle Twitter link input"""
+    user_id = update.effective_user.id
+    twitter_link = update.message.text.strip()
+    
+    if twitter_link.lower() == 'skip':
+        bot.orders[user_id]['twitter_link'] = None
+    else:
+        bot.orders[user_id]['twitter_link'] = twitter_link
+    
+    bot.orders[user_id]['order_date'] = datetime.now().isoformat()
+    
+    # Show order summary
+    summary_text, keyboard = bot.create_order_summary(user_id)
+    await update.message.reply_text(summary_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+    
+    return ConversationHandler.END
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle text messages"""
+    text = update.message.text.lower()
+    
+    if text in ['/start', 'start']:
+        await start_command(update, context)
+        return MAIN_MENU
+    
+    # Default response
+    welcome_text = bot.create_welcome_message()
+    await update.message.reply_text(welcome_text, parse_mode=ParseMode.HTML, reply_markup=bot.create_main_menu())
+    return MAIN_MENU
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle errors"""
+    logger.error(f"Error: {context.error}")
+    
+    if update and update.effective_user:
+        try:
+            welcome_text = bot.create_welcome_message()
+            await update.effective_user.send_message(
+                welcome_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=bot.create_main_menu()
+            )
+        except:
+            pass
+
+# ==================== RENDER DEPLOYMENT SETUP ====================
+
+# For Render health checks
+from flask import Flask
+from threading import Thread
+import time
+
+# Create Flask app for health checks
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def health_check():
+    return "🤖 Skeleton Trending Bot is running!", 200
+
+@flask_app.route('/health')
+def health():
+    return json.dumps({
+        'status': 'healthy',
+        'service': 'Skeleton Trending Boost Bot',
+        'timestamp': datetime.now().isoformat(),
+        'orders_processed': len(bot.orders)
+    }), 200
+
+def run_flask():
+    """Run Flask app for health checks"""
+    port = int(os.environ.get('PORT', 10000))
+    flask_app.run(host='0.0.0.0', port=port)
+
+def run_bot():
+    """Run Telegram bot"""
+    # Create Application
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # Create conversation handler
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start_command)],
+        states={
+            MAIN_MENU: [
+                CallbackQueryHandler(handle_button_press),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+            ],
+            SELECT_CHAIN: [CallbackQueryHandler(handle_button_press)],
+            SELECT_DURATION: [CallbackQueryHandler(handle_button_press)],
+            TOKEN_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_token_address)],
+            TELEGRAM_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_telegram_link)],
+            TWITTER_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_twitter_link)]
+        },
+        fallbacks=[CommandHandler('start', start_command)]
+    )
+    
+    # Add handlers
+    application.add_handler(conv_handler)
+    application.add_handler(CommandHandler("help", lambda u, c: start_command(u, c)))
+    application.add_error_handler(error_handler)
+    
+    # Start bot with error recovery
+    max_retries = 10
+    retry_delay = 30
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"""
+╔══════════════════════════════════════════╗
+║    🚀 SKELETON TRENDING BOOST BOT        ║
+║    Render Deployment v2.0                ║
+║    Attempt {attempt + 1}/{max_retries}                     ║
+╚══════════════════════════════════════════╝
+            """)
+            
+            print("✅ Currency Pairs Active:")
+            print(f"   • BSC → BNB: {bot.prices['4_hours']['bsc']:.3f} BNB")
+            print(f"   • Ethereum → ETH: {bot.prices['4_hours']['eth']:.3f} ETH")
+            print(f"   • Solana → SOL: {bot.prices['4_hours']['sol']:.2f} SOL")
+            print(f"   • Base → ETH: {bot.prices['4_hours']['base']:.3f} ETH")
+            print(f"   • PumpFun → SOL: {bot.prices['4_hours']['pumpfun']:.2f} SOL")
+            print(f"   • Possumlabs → SOL: {bot.prices['4_hours']['possum']:.2f} SOL")
+            print(f"   • FourMeme → BNB: {bot.prices['4_hours']['fourmeme']:.3f} BNB")
+            
+            print(f"\n🌐 External Links:")
+            print(f"   • All Promotions: {PROMOTION_GROUP_LINK}")
+            print(f"   • NFT Minting: {NFT_MINTING_GROUP_LINK}")
+            print(f"   • Support: {SUPPORT_CONTACT}")
+            
+            print("\n🤖 Bot is starting...")
+            
+            application.run_polling(
+                drop_pending_updates=True,
+                allowed_updates=Update.ALL_TYPES,
+                close_loop=False
+            )
+            
+        except Exception as e:
+            print(f"❌ Bot crashed on attempt {attempt + 1}: {e}")
+            if attempt < max_retries - 1:
+                print(f"🔄 Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                print("❌ Max retries reached. Bot stopped.")
+                raise
+
+def main():
+    """Main entry point - starts both Flask and Telegram bot"""
+    # Start Flask in a separate thread
+    flask_thread = Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    print("✅ Flask health check server started")
+    print(f"🌐 Health check: http://localhost:{os.environ.get('PORT', 10000)}/health")
+    
+    # Start Telegram bot
+    run_bot()
+
+if __name__ == '__main__':
+    main()
