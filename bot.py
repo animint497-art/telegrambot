@@ -13,7 +13,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # Bot Configuration - Use Render environment variable
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8520205259:AAHRDEwYkPz8gsS-l8SKdWf0rIZ_o2omHbg")
 
 # External links
 COMMUNITY_GROUP_LINK = "https://t.me/YourCommunityGroup"
@@ -808,4 +808,5 @@ def main():
     run_bot()
 
 if __name__ == '__main__':
+
     main()
