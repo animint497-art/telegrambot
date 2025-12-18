@@ -7,21 +7,33 @@ from telegram.constants import ParseMode
 import asyncio
 import json
 import uuid
+import threading
+from flask import Flask, jsonify
+import time
 
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Bot Configuration - Use Render environment variable
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8520205259:AAHRDEwYkPz8gsS-l8SKdWf0rIZ_o2omHbg")
+# ==================== ENVIRONMENT VARIABLES ====================
 
-# External links
-COMMUNITY_GROUP_LINK = "https://t.me/YourCommunityGroup"
-NFT_MINTING_GROUP_LINK = "https://t.me/YourNFTGroup"
-PROMOTION_GROUP_LINK = "https://t.me/YourPromotionGroup"
-VERIFY_TREND_LINK = "https://t.me/skeletontrend"
-LOUNGE_GROUP_LINK = "https://t.me/skeletonlounge"
-SUPPORT_CONTACT = "@skeletondev"
+# Bot Configuration - REQUIRED ENVIRONMENT VARIABLE
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("8520205259:AAHRDEwYkPz8gsS-l8SKdWf0rIZ_o2omHbg")
+
+# Flask Port Configuration - REQUIRED FOR RENDER
+PORT = int(os.environ.get('PORT', 10000))
+
+# External links (configure these as needed)
+COMMUNITY_GROUP_LINK = os.getenv("COMMUNITY_GROUP_LINK", "https://t.me/YourCommunityGroup")
+NFT_MINTING_GROUP_LINK = os.getenv("NFT_MINTING_GROUP_LINK", "https://t.me/YourNFTGroup")
+PROMOTION_GROUP_LINK = os.getenv("PROMOTION_GROUP_LINK", "https://t.me/YourPromotionGroup")
+VERIFY_TREND_LINK = os.getenv("VERIFY_TREND_LINK", "https://t.me/skeletontrend")
+LOUNGE_GROUP_LINK = os.getenv("LOUNGE_GROUP_LINK", "https://t.me/skeletonlounge")
+SUPPORT_CONTACT = os.getenv("SUPPORT_CONTACT", "@skeletondev")
+
+# ==================== BOT CONFIGURATION ====================
 
 # Conversation states
 MAIN_MENU, SELECT_CHAIN, SELECT_DURATION, TOKEN_ADDRESS, TELEGRAM_LINK, TWITTER_LINK = range(6)
@@ -38,14 +50,14 @@ class SkeletonTrendingBot:
                 'currency': 'BNB',
                 'symbol': '🔗',
                 'network': 'BEP20',
-                'conversion_rate': 0.45  # SOL to BNB conversion
+                'conversion_rate': 0.45
             },
             'eth': {
                 'name': 'Ethereum',
                 'currency': 'ETH',
                 'symbol': '🟦',
                 'network': 'ERC20',
-                'conversion_rate': 0.05  # SOL to ETH conversion
+                'conversion_rate': 0.05
             },
             'sol': {
                 'name': 'Solana',
@@ -232,7 +244,6 @@ Select the chain your token is on: {datetime.now().strftime("%H:%M")}
 
 <b>Community benefits:</b>
 • Promotion in community groups
-• Lower pricing than main trending
 • Still includes free NFT
 
 <i>Proceed with Solana?</i>
@@ -361,33 +372,34 @@ To avail contact {SUPPORT_CONTACT}
     
     def get_wallet_info(self, chain_id: str) -> dict:
         """Get wallet information for chain"""
+        # Get wallet addresses from environment variables or use defaults
         wallets = {
             'bsc': {
-                'address': '0xYourBNBWalletAddress',
+                'address': os.getenv("BSC_WALLET", "0xYourBNBWalletAddress"),
                 'network': 'Binance Smart Chain (BEP20)'
             },
             'eth': {
-                'address': '0xYourETHWalletAddress',
+                'address': os.getenv("ETH_WALLET", "0xYourETHWalletAddress"),
                 'network': 'Ethereum (ERC20)'
             },
             'sol': {
-                'address': 'YourSolanaWalletAddress',
+                'address': os.getenv("SOL_WALLET", "YourSolanaWalletAddress"),
                 'network': 'Solana'
             },
             'base': {
-                'address': '0xYourBaseWalletAddress',
+                'address': os.getenv("BASE_WALLET", "0xYourBaseWalletAddress"),
                 'network': 'Base Network'
             },
             'pumpfun': {
-                'address': 'YourSolanaWalletAddress',
+                'address': os.getenv("PUMPFUN_WALLET", "YourSolanaWalletAddress"),
                 'network': 'Solana'
             },
             'possum': {
-                'address': 'YourSolanaWalletAddress',
+                'address': os.getenv("POSSUM_WALLET", "YourSolanaWalletAddress"),
                 'network': 'Solana'
             },
             'fourmeme': {
-                'address': '0xYourBNBWalletAddress',
+                'address': os.getenv("FOURMEME_WALLET", "0xYourBNBWalletAddress"),
                 'network': 'Binance Smart Chain (BEP20)'
             }
         }
@@ -396,7 +408,7 @@ To avail contact {SUPPORT_CONTACT}
 # Initialize bot
 bot = SkeletonTrendingBot()
 
-# ==================== COMMAND HANDLERS ====================
+# ==================== TELEGRAM BOT HANDLERS ====================
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
@@ -495,7 +507,6 @@ Join our NFT community group:
         chain = query.data.replace("chain_", "")
         if "_community" in chain:
             chain = chain.replace("_community", "")
-            # Community trending specific logic if needed
         
         bot.orders[user_id]['chain'] = chain
         
@@ -510,6 +521,9 @@ Join our NFT community group:
         
         # Ask for token address
         chain_info = bot.chains.get(bot.orders[user_id]['chain'], bot.chains['sol'])
+        price = bot.prices[duration][bot.orders[user_id]['chain']]
+        currency = chain_info['currency']
+        
         text = f"""
 <b># Skeleton Trending Boost Bot</b>
 
@@ -521,7 +535,7 @@ Join our NFT community group:
 
 <b>Chain:</b> {chain_info['name']}
 <b>Duration:</b> {duration.replace('_', ' ')}
-<b>Payment:</b> {bot.prices[duration][bot.orders[user_id]['chain']]:.3f} {chain_info['currency']}
+<b>Payment:</b> {price:.3f if currency in ['ETH', 'BNB'] else price:.2f} {currency}
 
 <code>────────────────────</code>
 
@@ -535,7 +549,6 @@ Join our NFT community group:
         order_id = bot.orders[user_id].get('order_id', 'N/A')
         await query.answer(f"✅ Payment confirmed! Order ID: {order_id}\nContact {SUPPORT_CONTACT} with screenshot.", show_alert=True)
         
-        # Send support contact info
         text = f"""
 <b>📞 CONTACT SUPPORT</b>
 
@@ -695,67 +708,82 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
-# ==================== RENDER DEPLOYMENT SETUP ====================
+# ==================== FLASK APP FOR HEALTH CHECKS ====================
 
-# For Render health checks
-from flask import Flask
-from threading import Thread
-import time
-
-# Create Flask app for health checks
+# Create Flask app
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
-def health_check():
-    return "🤖 Skeleton Trending Bot is running!", 200
+def home():
+    return "🤖 Skeleton Trending Boost Bot is running!", 200
 
 @flask_app.route('/health')
 def health():
-    return json.dumps({
+    return jsonify({
         'status': 'healthy',
         'service': 'Skeleton Trending Boost Bot',
         'timestamp': datetime.now().isoformat(),
-        'orders_processed': len(bot.orders)
+        'orders_processed': len(bot.orders),
+        'environment': 'production' if os.getenv('RENDER') else 'development'
     }), 200
 
-def run_flask():
-    """Run Flask app for health checks"""
-    port = int(os.environ.get('PORT', 10000))
-    flask_app.run(host='0.0.0.0', port=port)
+@flask_app.route('/info')
+def info():
+    return jsonify({
+        'bot': 'Skeleton Trending Boost Bot',
+        'version': '2.0',
+        'deployment': 'Render',
+        'port': PORT,
+        'external_links': {
+            'community_group': COMMUNITY_GROUP_LINK,
+            'nft_group': NFT_MINTING_GROUP_LINK,
+            'promotion_group': PROMOTION_GROUP_LINK,
+            'support': SUPPORT_CONTACT
+        }
+    }), 200
 
-def run_bot():
-    """Run Telegram bot"""
-    # Create Application
-    application = Application.builder().token(BOT_TOKEN).build()
-    
-    # Create conversation handler
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start_command)],
-        states={
-            MAIN_MENU: [
-                CallbackQueryHandler(handle_button_press),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
-            ],
-            SELECT_CHAIN: [CallbackQueryHandler(handle_button_press)],
-            SELECT_DURATION: [CallbackQueryHandler(handle_button_press)],
-            TOKEN_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_token_address)],
-            TELEGRAM_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_telegram_link)],
-            TWITTER_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_twitter_link)]
-        },
-        fallbacks=[CommandHandler('start', start_command)]
-    )
-    
-    # Add handlers
-    application.add_handler(conv_handler)
-    application.add_handler(CommandHandler("help", lambda u, c: start_command(u, c)))
-    application.add_error_handler(error_handler)
-    
-    # Start bot with error recovery
-    max_retries = 10
+def run_flask_app():
+    """Run Flask app for health checks"""
+    logger.info(f"Starting Flask app on port {PORT}")
+    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+
+# ==================== TELEGRAM BOT RUNNER ====================
+
+def run_telegram_bot():
+    """Run the Telegram bot with retry logic"""
+    max_retries = 5
     retry_delay = 30
     
     for attempt in range(max_retries):
         try:
+            logger.info(f"Starting Telegram bot (Attempt {attempt + 1}/{max_retries})")
+            
+            # Create Application
+            application = Application.builder().token(BOT_TOKEN).build()
+            
+            # Create conversation handler
+            conv_handler = ConversationHandler(
+                entry_points=[CommandHandler('start', start_command)],
+                states={
+                    MAIN_MENU: [
+                        CallbackQueryHandler(handle_button_press),
+                        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+                    ],
+                    SELECT_CHAIN: [CallbackQueryHandler(handle_button_press)],
+                    SELECT_DURATION: [CallbackQueryHandler(handle_button_press)],
+                    TOKEN_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_token_address)],
+                    TELEGRAM_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_telegram_link)],
+                    TWITTER_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_twitter_link)]
+                },
+                fallbacks=[CommandHandler('start', start_command)]
+            )
+            
+            # Add handlers
+            application.add_handler(conv_handler)
+            application.add_handler(CommandHandler("help", lambda u, c: start_command(u, c)))
+            application.add_error_handler(error_handler)
+            
+            # Start bot
             print(f"""
 ╔══════════════════════════════════════════╗
 ║    🚀 SKELETON TRENDING BOOST BOT        ║
@@ -764,7 +792,12 @@ def run_bot():
 ╚══════════════════════════════════════════╝
             """)
             
-            print("✅ Currency Pairs Active:")
+            print("✅ Environment Variables Check:")
+            print(f"   • BOT_TOKEN: {'✓ Set' if BOT_TOKEN else '✗ Not Set'}")
+            print(f"   • PORT: {PORT}")
+            print(f"   • RENDER: {'✓ Detected' if os.getenv('RENDER') else '✗ Not Detected'}")
+            
+            print("\n✅ Currency Pairs Active:")
             print(f"   • BSC → BNB: {bot.prices['4_hours']['bsc']:.3f} BNB")
             print(f"   • Ethereum → ETH: {bot.prices['4_hours']['eth']:.3f} ETH")
             print(f"   • Solana → SOL: {bot.prices['4_hours']['sol']:.2f} SOL")
@@ -779,6 +812,8 @@ def run_bot():
             print(f"   • Support: {SUPPORT_CONTACT}")
             
             print("\n🤖 Bot is starting...")
+            print(f"🌐 Health check: http://localhost:{PORT}/health")
+            print(f"📊 Info: http://localhost:{PORT}/info")
             
             application.run_polling(
                 drop_pending_updates=True,
@@ -787,26 +822,36 @@ def run_bot():
             )
             
         except Exception as e:
-            print(f"❌ Bot crashed on attempt {attempt + 1}: {e}")
+            logger.error(f"Bot crashed on attempt {attempt + 1}: {e}")
             if attempt < max_retries - 1:
-                print(f"🔄 Retrying in {retry_delay} seconds...")
+                logger.info(f"Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
             else:
-                print("❌ Max retries reached. Bot stopped.")
+                logger.error("Max retries reached. Bot stopped.")
                 raise
+
+# ==================== MAIN FUNCTION ====================
 
 def main():
     """Main entry point - starts both Flask and Telegram bot"""
-    # Start Flask in a separate thread
-    flask_thread = Thread(target=run_flask, daemon=True)
-    flask_thread.start()
+    print("🚀 Initializing Skeleton Trending Boost Bot...")
+    print(f"📝 BOT_TOKEN: {'✓ Set' if BOT_TOKEN else '✗ ERROR: Not Set!'}")
+    print(f"🔧 PORT: {PORT}")
+    print(f"🌍 Environment: {'Render' if os.getenv('RENDER') else 'Local'}")
     
-    print("✅ Flask health check server started")
-    print(f"🌐 Health check: http://localhost:{os.environ.get('PORT', 10000)}/health")
+    if not BOT_TOKEN:
+        print("❌ ERROR: BOT_TOKEN environment variable is required!")
+        print("💡 Set it in Render: Environment → Add Environment Variable")
+        return
     
-    # Start Telegram bot
-    run_bot()
+    # Start Telegram bot in a separate thread
+    bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
+    bot_thread.start()
+    
+    logger.info("Telegram bot started in background thread")
+    
+    # Start Flask app in the main thread (required for Render)
+    run_flask_app()
 
 if __name__ == '__main__':
-
     main()
