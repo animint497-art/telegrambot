@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Bot Configuration - REQUIRED ENVIRONMENT VARIABLE
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise ValueError("8520205259:AAHRDEwYkPz8gsS-l8SKdWf0rIZ_o2omHbg")
+    raise ValueError("BOT_TOKEN environment variable not set! Please set it in Render environment variables.")
 
 # Flask Port Configuration - REQUIRED FOR RENDER
 PORT = int(os.environ.get('PORT', 10000))
