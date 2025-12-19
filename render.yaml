@@ -1,14 +1,37 @@
 services:
   - type: web
-    name: bot
+    name: skeleton-trending-bot
     env: python
-    plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: bot.py
+    startCommand: python app.py
     envVars:
       - key: BOT_TOKEN
         sync: false
       - key: PORT
         value: 10000
-    healthCheckPath: /health
-    autoDeploy: true
+      - key: COMMUNITY_GROUP_LINK
+        value: https://t.me/YourCommunityGroup
+      - key: NFT_MINTING_GROUP_LINK
+        value: https://t.me/YourNFTGroup
+      - key: PROMOTION_GROUP_LINK
+        value: https://t.me/YourPromotionGroup
+      - key: VERIFY_TREND_LINK
+        value: https://t.me/skeletontrend
+      - key: LOUNGE_GROUP_LINK
+        value: https://t.me/skeletonlounge
+      - key: SUPPORT_CONTACT
+        value: @skeletondev
+      - key: SOL_WALLET
+        value: YourSolanaWalletAddressHere
+      - key: ETH_WALLET
+        value: 0xYourEthereumWalletAddressHere
+      - key: BSC_WALLET
+        value: 0xYourBSCWalletAddressHere
+      - key: BASE_WALLET
+        value: 0xYourBaseWalletAddressHere
+      - key: PUMPFUN_WALLET
+        value: YourSolanaWalletAddressHere
+      - key: POSSUM_WALLET
+        value: YourSolanaWalletAddressHere
+      - key: FOURMEME_WALLET
+        value: 0xYourBSCWalletAddressHere
