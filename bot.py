@@ -10,22 +10,31 @@ import uuid
 import threading
 from flask import Flask, jsonify
 import time
+import sys
 
 # Enable logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # ==================== ENVIRONMENT VARIABLES ====================
 
-# Bot Configuration - REQUIRED ENVIRONMENT VARIABLE
+# Bot Configuration
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN environment variable not set! Please set it in Render environment variables.")
+    logger.error("❌ BOT_TOKEN environment variable not set!")
+    logger.error("Please set BOT_TOKEN in Render environment variables")
+    # Don't crash - just warn, but bot won't work without token
 
-# Flask Port Configuration - REQUIRED FOR RENDER
+# Flask Port Configuration
 PORT = int(os.environ.get('PORT', 10000))
 
-# External links (configure these as needed)
+# External links
 COMMUNITY_GROUP_LINK = os.getenv("COMMUNITY_GROUP_LINK", "https://t.me/YourCommunityGroup")
 NFT_MINTING_GROUP_LINK = os.getenv("NFT_MINTING_GROUP_LINK", "https://t.me/YourNFTGroup")
 PROMOTION_GROUP_LINK = os.getenv("PROMOTION_GROUP_LINK", "https://t.me/YourPromotionGroup")
@@ -43,7 +52,7 @@ class SkeletonTrendingBot:
         self.orders = {}
         self.user_data = {}
         
-        # Chain configurations with correct currency pairs
+        # Chain configurations
         self.chains = {
             'bsc': {
                 'name': 'Binance Smart Chain',
@@ -106,6 +115,7 @@ class SkeletonTrendingBot:
         
         # Calculate all prices
         self.prices = self.calculate_prices()
+        logger.info("✅ Bot initialized successfully")
     
     def calculate_prices(self):
         """Calculate prices for all chains"""
@@ -225,81 +235,6 @@ Select the chain your token is on: {datetime.now().strftime("%H:%M")}
         
         return text, InlineKeyboardMarkup(keyboard)
     
-    def create_community_selection(self) -> tuple:
-        """Create community trending selection (Solana only)"""
-        text = f"""
-<b>👥 COMMUNITY TRENDING</b>
-
-<code>────────────────────</code>
-
-<i>Community Trending only supports Solana tokens</i>
-
-<b>Pricing (in SOL):</b>
-• 4 Hours: {self.base_prices['4_hours']} SOL
-• 8 Hours: {self.base_prices['8_hours']} SOL
-• 12 Hours: {self.base_prices['12_hours']} SOL
-• 24 Hours: {self.base_prices['24_hours']} SOL
-
-<code>────────────────────</code>
-
-<b>Community benefits:</b>
-• Promotion in community groups
-• Still includes free NFT
-
-<i>Proceed with Solana?</i>
-"""
-        
-        keyboard = [
-            [InlineKeyboardButton("✅ Yes, Proceed with SOL", callback_data="chain_sol_community")],
-            [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")]
-        ]
-        
-        return text, InlineKeyboardMarkup(keyboard)
-    
-    def create_duration_selection(self, chain_id: str) -> tuple:
-        """Create duration selection with chain-specific prices"""
-        chain_info = self.chains.get(chain_id, self.chains['sol'])
-        
-        text = f"""
-<b># TRENDING BOOST SERVICE</b>
-
-<code>────────────────────</code>
-
-<b>Chain:</b> {chain_info['name']}
-<b>Currency:</b> {chain_info['currency']}
-<b>Network:</b> {chain_info['network']}
-
-<code>────────────────────</code>
-
-<b>Free Mass DM promotion</b> sending to 112k users + 1 SolidSkull NFT free for 24Hours trending orders!
-To avail contact {SUPPORT_CONTACT}
-
-<b>Select duration:</b>
-"""
-        
-        keyboard = []
-        for duration_key, duration_name in [('4_hours', '4 Hours'), ('8_hours', '8 Hours'), 
-                                           ('12_hours', '12 Hours'), ('24_hours', '24 Hours')]:
-            price = self.prices[duration_key][chain_id]
-            currency = chain_info['currency']
-            
-            # Format price
-            if currency in ['ETH', 'BNB']:
-                price_str = f"{price:.3f}"
-            else:
-                price_str = f"{price:.2f}"
-            
-            if duration_key == '24_hours':
-                button_text = f"⏱️ {duration_name} - {price_str} {currency} [+Mass Dm & NFT]"
-            else:
-                button_text = f"⏱️ {duration_name} - {price_str} {currency} [+ Free NFT]"
-            
-            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"duration_{duration_key}")])
-        
-        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_to_chains")])
-        
-        return text, InlineKeyboardMarkup(keyboard)
-    
     def create_order_summary(self, user_id: int) -> tuple:
         """Create order summary"""
         user_data = self.orders[user_id]
@@ -372,7 +307,6 @@ To avail contact {SUPPORT_CONTACT}
     
     def get_wallet_info(self, chain_id: str) -> dict:
         """Get wallet information for chain"""
-        # Get wallet addresses from environment variables or use defaults
         wallets = {
             'bsc': {
                 'address': os.getenv("BSC_WALLET", "0xYourBNBWalletAddress"),
@@ -415,6 +349,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = update.effective_user
     
+    logger.info(f"👤 User {user_id} ({user.username}) started bot")
+    
     bot.initialize_user(user_id)
     bot.user_data[user_id]['username'] = user.username or user.first_name
     
@@ -443,80 +379,96 @@ async def handle_button_press(update: Update, context: ContextTypes.DEFAULT_TYPE
         return SELECT_CHAIN
     
     elif query.data == "community_boost":
-        text, keyboard = bot.create_community_selection()
-        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-        return SELECT_CHAIN
-    
-    elif query.data == "all_promotions":
-        # Link to Telegram group
+        # Community trending - Solana only
         text = f"""
-<b>📊 ALL PROMOTION OPTIONS</b>
+<b>👥 COMMUNITY TRENDING</b>
 
 <code>────────────────────</code>
 
-Join our official promotion group to see:
-• All trending services
-• Community promotions
-• NFT minting info
-• Special offers
-• Live updates
+<i>Community Trending only supports Solana tokens</i>
+
+<b>Pricing (in SOL):</b>
+• 4 Hours: {bot.base_prices['4_hours']} SOL
+• 8 Hours: {bot.base_prices['8_hours']} SOL
+• 12 Hours: {bot.base_prices['12_hours']} SOL
+• 24 Hours: {bot.base_prices['24_hours']} SOL
 
 <code>────────────────────</code>
 
-<b>Click below to join:</b>
+<b>Community benefits:</b>
+• Promotion in community groups
+• Still includes free NFT
+
+<code>────────────────────</code>
+
+<i>Select duration for Solana:</i>
 """
-        await query.edit_message_text(
-            text,
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🎯 Join Promotion Group", url=PROMOTION_GROUP_LINK)],
-                [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")]
-            ])
-        )
-    
-    elif query.data == "mint_nft":
-        # Link to NFT group
-        text = f"""
-<b>💀 MINT SOLIDSKULL NFT</b>
-
-<code>────────────────────</code>
-
-<b>SolidSkull NFT Benefits:</b>
-• Exclusive access to premium channels
-• Priority support
-• Voting rights in ecosystem
-• Royalty sharing (5%)
-• Free with all trending orders!
-
-<code>────────────────────</code>
-
-<b>To mint or learn more:</b>
-Join our NFT community group:
-"""
-        await query.edit_message_text(
-            text,
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💀 Join NFT Group", url=NFT_MINTING_GROUP_LINK)],
-                [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")]
-            ])
-        )
+        keyboard = [
+            [InlineKeyboardButton(f"⏱️ 4 Hours - {bot.prices['4_hours']['sol']:.2f} SOL [+ Free NFT]", callback_data="duration_4_hours_community")],
+            [InlineKeyboardButton(f"⏱️ 8 Hours - {bot.prices['8_hours']['sol']:.2f} SOL [+ Free NFT]", callback_data="duration_8_hours_community")],
+            [InlineKeyboardButton(f"⏱️ 12 Hours - {bot.prices['12_hours']['sol']:.2f} SOL [+ Free NFT]", callback_data="duration_12_hours_community")],
+            [InlineKeyboardButton(f"⏱️ 24 Hours - {bot.prices['24_hours']['sol']:.2f} SOL [+Mass Dm & NFT]", callback_data="duration_24_hours_community")],
+            [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")]
+        ]
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
+        return SELECT_DURATION
     
     # ===== CHAIN SELECTION =====
     elif query.data.startswith("chain_"):
         chain = query.data.replace("chain_", "")
-        if "_community" in chain:
-            chain = chain.replace("_community", "")
-        
         bot.orders[user_id]['chain'] = chain
         
-        text, keyboard = bot.create_duration_selection(chain)
-        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        # Create duration selection
+        chain_info = bot.chains.get(chain, bot.chains['sol'])
+        text = f"""
+<b># TRENDING BOOST SERVICE</b>
+
+<code>────────────────────</code>
+
+<b>Chain:</b> {chain_info['name']}
+<b>Currency:</b> {chain_info['currency']}
+<b>Network:</b> {chain_info['network']}
+
+<code>────────────────────</code>
+
+<b>Free Mass DM promotion</b> sending to 112k users + 1 SolidSkull NFT free for 24Hours trending orders!
+To avail contact {SUPPORT_CONTACT}
+
+<b>Select duration:</b>
+"""
+        
+        keyboard = []
+        for duration_key, duration_name in [('4_hours', '4 Hours'), ('8_hours', '8 Hours'), 
+                                           ('12_hours', '12 Hours'), ('24_hours', '24 Hours')]:
+            price = bot.prices[duration_key][chain]
+            currency = chain_info['currency']
+            
+            # Format price
+            if currency in ['ETH', 'BNB']:
+                price_str = f"{price:.3f}"
+            else:
+                price_str = f"{price:.2f}"
+            
+            if duration_key == '24_hours':
+                button_text = f"⏱️ {duration_name} - {price_str} {currency} [+Mass Dm & NFT]"
+            else:
+                button_text = f"⏱️ {duration_name} - {price_str} {currency} [+ Free NFT]"
+            
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"duration_{duration_key}")])
+        
+        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_to_chains")])
+        
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
         return SELECT_DURATION
     
     # ===== DURATION SELECTION =====
     elif query.data.startswith("duration_"):
-        duration = query.data.replace("duration_", "")
+        if "_community" in query.data:
+            duration = query.data.replace("duration_", "").replace("_community", "")
+            bot.orders[user_id]['chain'] = 'sol'  # Community is Solana only
+        else:
+            duration = query.data.replace("duration_", "")
+        
         bot.orders[user_id]['duration'] = duration
         
         # Ask for token address
@@ -597,6 +549,60 @@ Join our NFT community group:
         text, keyboard = bot.create_chain_selection()
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         return SELECT_CHAIN
+    
+    # ===== OTHER MENUS =====
+    elif query.data == "all_promotions":
+        text = f"""
+<b>📊 ALL PROMOTION OPTIONS</b>
+
+<code>────────────────────</code>
+
+Join our official promotion group to see:
+• All trending services
+• Community promotions
+• NFT minting info
+• Special offers
+• Live updates
+
+<code>────────────────────</code>
+
+<b>Click below to join:</b>
+"""
+        await query.edit_message_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎯 Join Promotion Group", url=PROMOTION_GROUP_LINK)],
+                [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")]
+            ])
+        )
+    
+    elif query.data == "mint_nft":
+        text = f"""
+<b>💀 MINT SOLIDSKULL NFT</b>
+
+<code>────────────────────</code>
+
+<b>SolidSkull NFT Benefits:</b>
+• Exclusive access to premium channels
+• Priority support
+• Voting rights in ecosystem
+• Royalty sharing (5%)
+• Free with all trending orders!
+
+<code>────────────────────</code>
+
+<b>To mint or learn more:</b>
+Join our NFT community group:
+"""
+        await query.edit_message_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💀 Join NFT Group", url=NFT_MINTING_GROUP_LINK)],
+                [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")]
+            ])
+        )
     
     return MAIN_MENU
 
@@ -705,12 +711,11 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode=ParseMode.HTML,
                 reply_markup=bot.create_main_menu()
             )
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to send error message: {e}")
 
 # ==================== FLASK APP FOR HEALTH CHECKS ====================
 
-# Create Flask app
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -724,6 +729,7 @@ def health():
         'service': 'Skeleton Trending Boost Bot',
         'timestamp': datetime.now().isoformat(),
         'orders_processed': len(bot.orders),
+        'bot_token_set': bool(BOT_TOKEN),
         'environment': 'production' if os.getenv('RENDER') else 'development'
     }), 200
 
@@ -745,18 +751,30 @@ def info():
 def run_flask_app():
     """Run Flask app for health checks"""
     logger.info(f"Starting Flask app on port {PORT}")
+    
+    # Check if running with gunicorn (production)
+    if "gunicorn" in sys.modules:
+        logger.info("Running with gunicorn - skipping manual run")
+        return
+    
+    # Development mode
     flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
 # ==================== TELEGRAM BOT RUNNER ====================
 
 def run_telegram_bot():
     """Run the Telegram bot with retry logic"""
+    if not BOT_TOKEN:
+        logger.error("❌ BOT_TOKEN not set! Bot cannot start.")
+        logger.error("Please set BOT_TOKEN in Render environment variables")
+        return
+    
     max_retries = 5
     retry_delay = 30
     
     for attempt in range(max_retries):
         try:
-            logger.info(f"Starting Telegram bot (Attempt {attempt + 1}/{max_retries})")
+            logger.info(f"🚀 Starting Telegram bot (Attempt {attempt + 1}/{max_retries})")
             
             # Create Application
             application = Application.builder().token(BOT_TOKEN).build()
@@ -780,78 +798,60 @@ def run_telegram_bot():
             
             # Add handlers
             application.add_handler(conv_handler)
-            application.add_handler(CommandHandler("help", lambda u, c: start_command(u, c)))
+            application.add_handler(CommandHandler("help", start_command))
             application.add_error_handler(error_handler)
             
-            # Start bot
-            print(f"""
-╔══════════════════════════════════════════╗
-║    🚀 SKELETON TRENDING BOOST BOT        ║
-║    Render Deployment v2.0                ║
-║    Attempt {attempt + 1}/{max_retries}                     ║
-╚══════════════════════════════════════════╝
-            """)
+            # Log startup info
+            logger.info("✅ Bot application created successfully")
+            logger.info(f"🌐 Health check: http://localhost:{PORT}/health")
+            logger.info(f"📊 Info: http://localhost:{PORT}/info")
+            logger.info(f"🤖 Bot username: @{(application.bot.username or 'Unknown')}")
             
-            print("✅ Environment Variables Check:")
-            print(f"   • BOT_TOKEN: {'✓ Set' if BOT_TOKEN else '✗ Not Set'}")
-            print(f"   • PORT: {PORT}")
-            print(f"   • RENDER: {'✓ Detected' if os.getenv('RENDER') else '✗ Not Detected'}")
-            
-            print("\n✅ Currency Pairs Active:")
-            print(f"   • BSC → BNB: {bot.prices['4_hours']['bsc']:.3f} BNB")
-            print(f"   • Ethereum → ETH: {bot.prices['4_hours']['eth']:.3f} ETH")
-            print(f"   • Solana → SOL: {bot.prices['4_hours']['sol']:.2f} SOL")
-            print(f"   • Base → ETH: {bot.prices['4_hours']['base']:.3f} ETH")
-            print(f"   • PumpFun → SOL: {bot.prices['4_hours']['pumpfun']:.2f} SOL")
-            print(f"   • Possumlabs → SOL: {bot.prices['4_hours']['possum']:.2f} SOL")
-            print(f"   • FourMeme → BNB: {bot.prices['4_hours']['fourmeme']:.3f} BNB")
-            
-            print(f"\n🌐 External Links:")
-            print(f"   • All Promotions: {PROMOTION_GROUP_LINK}")
-            print(f"   • NFT Minting: {NFT_MINTING_GROUP_LINK}")
-            print(f"   • Support: {SUPPORT_CONTACT}")
-            
-            print("\n🤖 Bot is starting...")
-            print(f"🌐 Health check: http://localhost:{PORT}/health")
-            print(f"📊 Info: http://localhost:{PORT}/info")
-            
-            application.run_polling(
+            # Start bot polling
+            logger.info("🤖 Starting bot polling...")
+            await application.run_polling(
                 drop_pending_updates=True,
                 allowed_updates=Update.ALL_TYPES,
                 close_loop=False
             )
             
         except Exception as e:
-            logger.error(f"Bot crashed on attempt {attempt + 1}: {e}")
+            logger.error(f"❌ Bot crashed on attempt {attempt + 1}: {e}")
             if attempt < max_retries - 1:
-                logger.info(f"Retrying in {retry_delay} seconds...")
+                logger.info(f"⏱️ Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
             else:
-                logger.error("Max retries reached. Bot stopped.")
+                logger.error("🚨 Max retries reached. Bot stopped.")
                 raise
 
-# ==================== MAIN FUNCTION ====================
+async def main_async():
+    """Async main function to run both bot and Flask"""
+    # Start bot in background task
+    bot_task = asyncio.create_task(run_telegram_bot())
+    
+    # Run Flask in separate thread
+    import threading
+    flask_thread = threading.Thread(target=run_flask_app, daemon=True)
+    flask_thread.start()
+    
+    # Wait for bot task (it will run until stopped)
+    await bot_task
 
 def main():
-    """Main entry point - starts both Flask and Telegram bot"""
+    """Main entry point"""
     print("🚀 Initializing Skeleton Trending Boost Bot...")
-    print(f"📝 BOT_TOKEN: {'✓ Set' if BOT_TOKEN else '✗ ERROR: Not Set!'}")
+    print(f"📝 BOT_TOKEN: {'✅ Set' if BOT_TOKEN else '❌ NOT SET - Bot will not work!'}")
     print(f"🔧 PORT: {PORT}")
     print(f"🌍 Environment: {'Render' if os.getenv('RENDER') else 'Local'}")
     
     if not BOT_TOKEN:
-        print("❌ ERROR: BOT_TOKEN environment variable is required!")
+        print("\n❌ CRITICAL ERROR: BOT_TOKEN environment variable is required!")
         print("💡 Set it in Render: Environment → Add Environment Variable")
+        print("📋 Get token from @BotFather on Telegram")
         return
     
-    # Start Telegram bot in a separate thread
-    bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
-    bot_thread.start()
-    
-    logger.info("Telegram bot started in background thread")
-    
-    # Start Flask app in the main thread (required for Render)
-    run_flask_app()
+    # Run the async main function
+    asyncio.run(main_async())
 
 if __name__ == '__main__':
     main()
